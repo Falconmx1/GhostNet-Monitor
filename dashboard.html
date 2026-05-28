@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GhostNet-Monitor Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0e27;
+            color: #00ff9d;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff9d;
+            text-shadow: 0 0 10px #00ff9d;
+            margin-bottom: 20px;
+        }
+        .status {
+            background: #1a1f3a;
+            border: 1px solid #00ff9d;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #1a1f3a;
+            border: 1px solid #333;
+            padding: 15px;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+        .card:hover {
+            border-color: #00ff9d;
+            box-shadow: 0 0 10px rgba(0,255,157,0.3);
+        }
+        .card h3 {
+            color: #ff3366;
+            margin-bottom: 10px;
+        }
+        .metric {
+            font-size: 2em;
+            font-weight: bold;
+            color: #00ff9d;
+        }
+        .alert {
+            background: #ff3366;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+        button {
+            background: #ff3366;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: monospace;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #00ff9d;
+            color: #0a0e27;
+        }
+        pre {
+            background: #0a0e27;
+            padding: 10px;
+            overflow-x: auto;
+            font-size: 0.8em;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>👻 GhostNet-Monitor | AI Security Dashboard</h1>
+    
+    <div class="status" id="status">
+        🟢 Sistema activo | Último escaneo: <span id="lastScan">Cargando...</span>
+    </div>
+    
+    <div class="grid">
+        <div class="card">
+            <h3>🔍 Anomalías Detectadas</h3>
+            <div class="metric" id="anomalies">-</div>
+            <div id="anomalyList"></div>
+        </div>
+        
+        <div class="card">
+            <h3>🎯 Ataques Clasificados</h3>
+            <div class="metric" id="attacks">-</div>
+            <div id="attackBreakdown"></div>
+        </div>
+        
+        <div class="card">
+            <h3>🦠 Malware Encontrado</h3>
+            <div class="metric" id="malware">-</div>
+            <div id="malwareList"></div>
+        </div>
+        
+        <div class="card">
+            <h3>💡 Recomendaciones</h3>
+            <div id="recommendations"></div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h3>📊 Reporte Completo (JSON)</h3>
+        <button onclick="loadReport()">🔄 Actualizar desde GitHub Actions</button>
+        <pre id="fullReport">Click en actualizar...</pre>
+    </div>
+    
+    <div class="footer">
+        GhostNet-Monitor v2.0 | AI-Powered Cybersecurity | 🔒 Modo Sigilo Activado
+    </div>
+</div>
+
+<script>
+    async function loadReport() {
+        // Simular carga de últimos resultados (en producción, conectar a API)
+        const statusDiv = document.getElementById('status');
+        statusDiv.innerHTML = '🟡 Actualizando...';
+        
+        setTimeout(() => {
+            // Datos de ejemplo - en producción, obtener de artifacts de GitHub
+            const mockData = {
+                anomalies: 42,
+                attacks: 28,
+                malware: 7,
+                attackTypes: { DDoS: 12, PortScan: 10, BruteForce: 4, Malware: 2 },
+                malwareNames: ['Emotet', 'Trickbot', 'Ryuk'],
+                recommendations: ['Bloquear IPs maliciosas', 'Actualizar firmas antivirus', 'Revisar logs de autenticación']
+            };
+            
+            document.getElementById('anomalies').innerText = mockData.anomalies;
+            document.getElementById('attacks').innerText = mockData.attacks;
+            document.getElementById('malware').innerText = mockData.malware;
+            
+            let attackHtml = '';
+            for (let [type, count] of Object.entries(mockData.attackTypes)) {
+                attackHtml += `<div>${type}: ${count}</div>`;
+            }
+            document.getElementById('attackBreakdown').innerHTML = attackHtml;
+            
+            let malwareHtml = '';
+            mockData.malwareNames.forEach(m => {
+                malwareHtml += `<div class="alert">⚠️ ${m}</div>`;
+            });
+            document.getElementById('malwareList').innerHTML = malwareHtml || '<div>✅ Sin malware crítico</div>';
+            
+            let recHtml = '';
+            mockData.recommendations.forEach(r => {
+                recHtml += `<div>🔹 ${r}</div>`;
+            });
+            document.getElementById('recommendations').innerHTML = recHtml;
+            
+            document.getElementById('fullReport').innerText = JSON.stringify(mockData, null, 2);
+            statusDiv.innerHTML = '🟢 Sistema activo | Último escaneo: ' + new Date().toLocaleString();
+        }, 1000);
+    }
+    
+    loadReport();
+    setInterval(loadReport, 30000); // Actualizar cada 30 segundos
+</script>
+</body>
+</html>
