@@ -1,0 +1,90 @@
+name: GhostNet AI Security Scan
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Cada 6 horas
+  workflow_dispatch:         # Manual desde GitHub
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy scikit-learn
+    
+    - name: Create output directory
+      run: mkdir -p output
+    
+    - name: Run Anomaly Detection
+      run: python ai/detect_anomalies.py
+    
+    - name: Run Attack Classification
+      run: python ai/classify_attack.py
+    
+    - name: Run Traffic Analysis
+      run: python ai/traffic_analyzer.py
+    
+    - name: Run Malware Scanner
+      run: python ai/malware_scanner.py
+    
+    - name: Combine all alerts
+      run: |
+        python -c "
+        import json
+        import glob
+        from datetime import datetime
+        
+        all_alerts = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'reports': {}
+        }
+        
+        for file in glob.glob('output/*.json'):
+            if file != 'output/alerts.json':
+                with open(file, 'r') as f:
+                    key = file.split('/')[-1].replace('.json', '')
+                    all_alerts['reports'][key] = json.load(f)
+        
+        with open('output/alerts.json', 'w') as f:
+            json.dump(all_alerts, f, indent=2)
+        "
+    
+    - name: Upload security alerts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ghostnet-alerts
+        path: output/
+        retention-days: 30
+    
+    - name: Summary of findings
+      run: |
+        echo "## 🛡️ GhostNet-Monitor Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Module | Findings |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f output/anomalies.json ]; then
+          ANOM=$(jq '.anomalies_found' output/anomalies.json)
+          echo "| Anomaly Detection | $ANOM anomalies |" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f output/attacks.json ]; then
+          ATK=$(jq '.attacks_detected' output/attacks.json)
+          echo "| Attack Classification | $ATK attacks |" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f output/malware_scan.json ]; then
+          MAL=$(jq '.malware_detected' output/malware_scan.json)
+          echo "| Malware Scanner | $MAL malware files |" >> $GITHUB_STEP_SUMMARY
+        fi
