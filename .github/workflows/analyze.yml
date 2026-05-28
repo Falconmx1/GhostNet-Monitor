@@ -1,90 +1,303 @@
-name: GhostNet AI Security Scan
+name: GhostNet AI Security Scan - PRO
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # Cada 6 horas
-  workflow_dispatch:         # Manual desde GitHub
+    - cron: '0 */6 * * *'      # Cada 6 horas
+    - cron: '0 0 * * *'        # Reporte diario completo a medianoche
+  workflow_dispatch:            # Manual desde GitHub
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'data/**'
+      - 'ai/**'
+
+env:
+  PYTHON_VERSION: '3.11'
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+  ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+  GHOSTNET_MODE: 'PRODUCTION'
 
 jobs:
   security-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     
     steps:
-    - name: Checkout repository
+    - name: 🛡️ Checkout repository
       uses: actions/checkout@v4
     
-    - name: Setup Python
+    - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
     
-    - name: Install dependencies
+    - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy scikit-learn
+        pip install numpy scikit-learn pandas scapy requests
     
-    - name: Create output directory
-      run: mkdir -p output
+    - name: 📁 Create output directories
+      run: |
+        mkdir -p output/reports output/pcaps output/alerts
+        mkdir -p data/raw data/processed
     
-    - name: Run Anomaly Detection
-      run: python ai/detect_anomalies.py
+    - name: 🔍 Run Anomaly Detection Engine
+      id: anomalies
+      run: |
+        python ai/detect_anomalies.py 2>&1 | tee output/anomaly_log.txt
+        echo "anomaly_count=$(jq '.anomalies_found' output/anomalies.json)" >> $GITHUB_OUTPUT
     
-    - name: Run Attack Classification
-      run: python ai/classify_attack.py
+    - name: 🎯 Run Attack Classification Engine
+      id: attacks
+      run: |
+        python ai/classify_attack.py 2>&1 | tee output/attack_log.txt
+        echo "attack_count=$(jq '.attacks_detected' output/attacks.json)" >> $GITHUB_OUTPUT
     
-    - name: Run Traffic Analysis
-      run: python ai/traffic_analyzer.py
+    - name: 📊 Run Traffic Analysis Engine
+      id: traffic
+      run: |
+        python ai/traffic_analyzer.py 2>&1 | tee output/traffic_log.txt
+        echo "suspicious_flows=$(jq '.statistics.suspicious_flows | length' output/traffic_analysis.json)" >> $GITHUB_OUTPUT
     
-    - name: Run Malware Scanner
-      run: python ai/malware_scanner.py
+    - name: 🦠 Run Malware Scanner Engine
+      id: malware
+      run: |
+        python ai/malware_scanner.py 2>&1 | tee output/malware_log.txt
+        echo "malware_count=$(jq '.malware_detected' output/malware_scan.json)" >> $GITHUB_OUTPUT
     
-    - name: Combine all alerts
+    - name: 🧠 Run Advanced AI Detector (Deep Learning)
+      id: advanced
+      run: |
+        python ai/advanced_detector.py 2>&1 | tee output/advanced_log.txt
+        echo "critical_alerts=$(jq '.critical_alerts | length' output/advanced_report.json)" >> $GITHUB_OUTPUT
+    
+    - name: 📑 Generate Consolidated Report
+      id: report
       run: |
         python -c "
         import json
         import glob
         from datetime import datetime
         
-        all_alerts = {
+        # Recopilar todos los resultados
+        all_data = {
             'timestamp': datetime.utcnow().isoformat(),
-            'reports': {}
+            'scan_metadata': {
+                'trigger': '${{ github.event_name }}',
+                'runner': '${{ runner.os }}',
+                'commit': '${{ github.sha }}',
+                'branch': '${{ github.ref_name }}'
+            },
+            'summary': {
+                'anomalies': ${{ steps.anomalies.outputs.anomaly_count || 0 }},
+                'attacks': ${{ steps.attacks.outputs.attack_count || 0 }},
+                'malware': ${{ steps.malware.outputs.malware_count || 0 }},
+                'suspicious_flows': ${{ steps.traffic.outputs.suspicious_flows || 0 }},
+                'critical_alerts': ${{ steps.advanced.outputs.critical_alerts || 0 }}
+            },
+            'detailed_reports': {}
         }
         
-        for file in glob.glob('output/*.json'):
-            if file != 'output/alerts.json':
-                with open(file, 'r') as f:
-                    key = file.split('/')[-1].replace('.json', '')
-                    all_alerts['reports'][key] = json.load(f)
+        # Cargar cada JSON generado
+        for json_file in glob.glob('output/*.json'):
+            if 'alerts.json' not in json_file:
+                try:
+                    with open(json_file, 'r') as f:
+                        key = json_file.split('/')[-1].replace('.json', '')
+                        all_data['detailed_reports'][key] = json.load(f)
+                except:
+                    pass
         
+        # Determinar nivel de riesgo
+        total_issues = all_data['summary']['anomalies'] + all_data['summary']['attacks'] + all_data['summary']['malware']
+        if total_issues > 50:
+            all_data['risk_level'] = 'CRITICAL'
+        elif total_issues > 20:
+            all_data['risk_level'] = 'HIGH'
+        elif total_issues > 5:
+            all_data['risk_level'] = 'MEDIUM'
+        else:
+            all_data['risk_level'] = 'LOW'
+        
+        # Guardar reporte consolidado
         with open('output/alerts.json', 'w') as f:
-            json.dump(all_alerts, f, indent=2)
+            json.dump(all_data, f, indent=2)
+        
+        # Guardar resumen para steps siguientes
+        with open('output/summary.txt', 'w') as f:
+            f.write(f\"Risk Level: {all_data['risk_level']}\n\")
+            f.write(f\"Total Issues: {total_issues}\n\")
+            f.write(f\"Anomalies: {all_data['summary']['anomalies']}\n\")
+            f.write(f\"Attacks: {all_data['summary']['attacks']}\n\")
+            f.write(f\"Malware: {all_data['summary']['malware']}\n\")
+        "
+      
+    - name: 📊 Generate HTML Report
+      run: |
+        python -c "
+        import json
+        from datetime import datetime
+        
+        with open('output/alerts.json', 'r') as f:
+            data = json.load(f)
+        
+        html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset='UTF-8'><title>GhostNet Report - {datetime.utcnow().isoformat()}</title>
+        <style>
+            body {{ font-family: monospace; background: #0a0e27; color: #00ff9d; padding: 20px; }}
+            .critical {{ color: #ff3366; }}
+            .high {{ color: #ff9933; }}
+            .medium {{ color: #ffcc00; }}
+            .low {{ color: #00ff9d; }}
+            .card {{ background: #1a1f3a; border: 1px solid #333; padding: 15px; margin: 10px 0; border-radius: 5px; }}
+        </style>
+        </head>
+        <body>
+        <h1>👻 GhostNet-Monitor Security Report</h1>
+        <div class='card'>
+            <h2>Risk Level: <span class='{data['risk_level'].lower()}'>{data['risk_level']}</span></h2>
+            <p>Scan Time: {data['timestamp']}</p>
+            <p>Trigger: {data['scan_metadata']['trigger']}</p>
+        </div>
+        <div class='card'>
+            <h3>📊 Summary</h3>
+            <ul>
+                <li>🔍 Anomalies: {data['summary']['anomalies']}</li>
+                <li>🎯 Attacks: {data['summary']['attacks']}</li>
+                <li>🦠 Malware: {data['summary']['malware']}</li>
+                <li>📡 Suspicious Flows: {data['summary']['suspicious_flows']}</li>
+                <li>⚠️ Critical Alerts: {data['summary']['critical_alerts']}</li>
+            </ul>
+        </div>
+        </body>
+        </html>
+        '''
+        
+        with open('output/ghostnet_report.html', 'w') as f:
+            f.write(html)
         "
     
-    - name: Upload security alerts
+    - name: 🚨 Send Slack Alert (if high risk)
+      if: steps.report.outputs.risk_level == 'CRITICAL' || steps.report.outputs.risk_level == 'HIGH'
+      uses: slackapi/slack-github-action@v1.25
+      with:
+        payload: |
+          {
+            "text": "🚨 *GhostNet-Monitor Alert* 🚨\nRisk Level: *${{ steps.report.outputs.risk_level }}*\nTotal Issues: ${{ steps.report.outputs.total_issues }}\nAnomalies: ${{ steps.anomalies.outputs.anomaly_count }}\nAttacks: ${{ steps.attacks.outputs.attack_count }}\nMalware: ${{ steps.malware.outputs.malware_count }}\n\nView details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "username": "GhostNet-Monitor",
+            "icon_emoji": ":ghost:"
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    
+    - name: 📧 Send Email Alert (if critical)
+      if: steps.report.outputs.risk_level == 'CRITICAL'
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{secrets.MAIL_USERNAME}}
+        password: ${{secrets.MAIL_PASSWORD}}
+        subject: "🚨 GhostNet-Monitor - CRITICAL Security Alert"
+        to: ${{ secrets.ALERT_EMAIL }}
+        from: GhostNet-Monitor
+        body: |
+          Se han detectado amenazas CRÍTICAS en el último escaneo.
+          
+          Resumen:
+          - Anomalías: ${{ steps.anomalies.outputs.anomaly_count }}
+          - Ataques: ${{ steps.attacks.outputs.attack_count }}
+          - Malware: ${{ steps.malware.outputs.malware_count }}
+          
+          Revisar detalles en: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    
+    - name: 💾 Upload All Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ghostnet-alerts
-        path: output/
+        name: ghostnet-complete-report-${{ github.run_id }}
+        path: |
+          output/*.json
+          output/*.html
+          output/*.txt
+          output/alerts/
         retention-days: 30
+        compression-level: 6
     
-    - name: Summary of findings
+    - name: 📈 Update Security Tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: output/alerts.json
+        category: ghostnet-security-scan
+    
+    - name: 📝 Create GitHub Issue (if critical)
+      if: steps.report.outputs.risk_level == 'CRITICAL'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('output/summary.txt', 'utf8');
+          
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🚨 GhostNet-Monitor: CRITICAL Security Threats Detected',
+            body: `## 🔴 Alerta de Seguridad CRÍTICA\n\n${summary}\n\n### Acción Requerida\n- Revisar artifacts en esta ejecución\n- Investigar fuentes de tráfico malicioso\n- Aislar sistemas afectados\n\n🔗 [Ver detalles del scan](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+            labels: ['security', 'critical', 'ghostnet-alert']
+          });
+    
+    - name: ✅ Generate Job Summary
       run: |
-        echo "## 🛡️ GhostNet-Monitor Results" >> $GITHUB_STEP_SUMMARY
+        echo "## 🛡️ GhostNet-Monitor Scan Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Module | Findings |" >> $GITHUB_STEP_SUMMARY
-        echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Métrica | Resultado | Severidad |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|-----------|-----------|" >> $GITHUB_STEP_SUMMARY
         
-        if [ -f output/anomalies.json ]; then
-          ANOM=$(jq '.anomalies_found' output/anomalies.json)
-          echo "| Anomaly Detection | $ANOM anomalies |" >> $GITHUB_STEP_SUMMARY
+        ANOM=$(jq '.summary.anomalies' output/alerts.json)
+        if [ "$ANOM" -gt 10 ]; then
+          SEV="🔴 Alta"
+        elif [ "$ANOM" -gt 3 ]; then
+          SEV="🟡 Media"
+        else
+          SEV="🟢 Baja"
         fi
+        echo "| 🔍 Anomalías | $ANOM | $SEV |" >> $GITHUB_STEP_SUMMARY
         
-        if [ -f output/attacks.json ]; then
-          ATK=$(jq '.attacks_detected' output/attacks.json)
-          echo "| Attack Classification | $ATK attacks |" >> $GITHUB_STEP_SUMMARY
+        ATK=$(jq '.summary.attacks' output/alerts.json)
+        if [ "$ATK" -gt 5 ]; then
+          SEV="🔴 Alta"
+        elif [ "$ATK" -gt 1 ]; then
+          SEV="🟡 Media"
+        else
+          SEV="🟢 Baja"
         fi
+        echo "| 🎯 Ataques | $ATK | $SEV |" >> $GITHUB_STEP_SUMMARY
         
-        if [ -f output/malware_scan.json ]; then
-          MAL=$(jq '.malware_detected' output/malware_scan.json)
-          echo "| Malware Scanner | $MAL malware files |" >> $GITHUB_STEP_SUMMARY
+        MAL=$(jq '.summary.malware' output/alerts.json)
+        if [ "$MAL" -gt 0 ]; then
+          SEV="🔴 CRÍTICA"
+        else
+          SEV="🟢 Baja"
         fi
+        echo "| 🦠 Malware | $MAL | $SEV |" >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📎 Artifacts Generados" >> $GITHUB_STEP_SUMMARY
+        echo "- Reporte JSON completo" >> $GITHUB_STEP_SUMMARY
+        echo "- Dashboard HTML interactivo" >> $GITHUB_STEP_SUMMARY
+        echo "- Logs detallados por módulo" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🔗 **Descargar artifacts**: [ghostnet-complete-report-${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+    - name: 🎉 Completion Message
+      run: |
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "👻 GhostNet-Monitor Scan Complete! 👻"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📊 Risk Level: $(jq -r '.risk_level' output/alerts.json)"
+        echo "📈 Total Issues: $(jq '.summary.anomalies + .summary.attacks + .summary.malware' output/alerts.json)"
+        echo "📁 Artifacts saved and uploaded"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔗 View full report in Actions artifacts"
